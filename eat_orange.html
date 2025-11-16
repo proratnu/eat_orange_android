@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Eat Orange — Prototype</title>
+  <style>
+    :root{
+      --bg:#061118; --panel:#0f1720; --accent:#f78a1d; --muted:#9aa;
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:#eee;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    .wrap{max-width:980px;margin:18px auto;padding:18px;background:var(--panel);border-radius:12px;box-shadow:0 6px 30px rgba(0,0,0,.6)}
+    h1{margin:0 0 8px;font-size:20px;display:flex;gap:8px;align-items:center}
+    #gameCanvas{background:#08121a;display:block;margin:12px auto;border-radius:8px}
+    .row{display:flex;gap:8px;align-items:center}
+    button{background:#1f2937;color:#fff;border:0;padding:8px 12px;border-radius:8px;cursor:pointer}
+    .info{margin-top:8px;color:#bcd}
+    .controls{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+    label{font-size:13px;color:var(--muted)}
+    .small{font-size:12px;color:var(--muted)}
+    .menu{display:flex;gap:8px;flex-direction:column;align-items:center;padding:18px}
+    .hidden{display:none}
+    .big{font-size:18px;padding:10px 18px;border-radius:10px;background:linear-gradient(90deg,#2b6,#29a)}
+    .accent{color:var(--accent)}
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .footer{margin-top:12px;color:var(--muted);font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1><span style="width:36px;height:36px;display:inline-block;vertical-align:middle"><img src="icon.svg" alt="icon" style="width:36px;height:36px"></span> Eat Orange</h1>
+      <div><strong>Level:</strong> <span id="levelNumber">1</span> / <span id="maxLevels">2000</span></div>
+    </div>
+
+    <div id="menu" class="menu">
+      <div><button id="btnPlay" class="big">Play</button></div>
+      <div style="display:flex;gap:8px">
+        <button id="btnContinue">Continue</button>
+        <button id="btnLevels">Level Select</button>
+        <button id="btnSettings">Settings</button>
+      </div>
+      <div class="small">Eat oranges to grow, reach the golden exit. Avoid guards and walls.</div>
+    </div>
+
+    <div id="gameArea" class="hidden">
+      <div class="row">
+        <canvas id="gameCanvas" width="640" height="640"></canvas>
+        <div style="flex:1">
+          <div><strong>Score:</strong> <span id="score">0</span></div>
+          <div><strong>Size:</strong> <span id="size">3</span></div>
+          <div><strong>Goal:</strong> Eat oranges and reach the exit gate</div>
+          <div class="controls">
+            <button id="btnStart">Restart Level</button>
+            <button id="btnNext">Skip Level</button>
+            <label class="small">Speed: <input id="speedRange" type="range" min="4" max="20" value="10"></label>
+            <label class="small">Grid: <select id="gridSize"><option value="16">16x16</option><option value="20" selected>20x20</option><option value="24">24x24</option></select></label>
+            <button id="btnMenu">Back to Menu</button>
+          </div>
+          <div id="status" class="info small"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="levelsModal" class="hidden menu">
+      <div style="max-height:320px;overflow:auto;width:100%">
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <!-- level buttons will be injected -->
+        </div>
+      </div>
+      <div><button id="btnCloseLevels">Close</button></div>
+    </div>
+
+    <div id="settingsModal" class="hidden menu">
+      <label>Sound: <input type="checkbox" id="toggleSound" checked></label>
+      <label>Vibrate on hit: <input type="checkbox" id="toggleVibrate"></label>
+      <div><button id="btnCloseSettings">Close</button></div>
+    </div>
+
+    <div class="footer">Prototype by ChatGPT — open this file in a modern browser or Android WebView to play.</div>
+  </div>
+
+<script>
+(() => {
+  const MAX_LEVEL = 2000;
+  let level = parseInt(localStorage.getItem('eat_level')||'1',10);
+  let gridSize = parseInt(localStorage.getItem('eat_grid')||'20',10);
+  let speed = parseInt(localStorage.getItem('eat_speed')||'10',10);
+  let soundOn = (localStorage.getItem('eat_sound')||'1')==='1';
+
+  const menu = document.getElementById('menu');
+  const gameArea = document.getElementById('gameArea');
+  const levelsModal = document.getElementById('levelsModal');
+  const settingsModal = document.getElementById('settingsModal');
+  const levelNumber = document.getElementById('levelNumber');
+  document.getElementById('maxLevels').textContent = MAX_LEVEL;
+
+  // Simple audio using WebAudio
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const actx = AudioCtx ? new AudioCtx() : null;
+  function playBeep(freq=440,dur=0.08){
+    if(!soundOn || !acxt) return;
+    const o = actx.createOscillator();
+    const g = actx.createGain();
+    o.type='sine'; o.frequency.value = freq;
+    g.gain.value = 0.08;
+    o.connect(g); g.connect(acxt.destination);
+    o.start(); setTimeout(()=>{ o.stop(); }, dur*1000);
+  }
+
+  // inject level buttons (first 50 for quick selection)
+  const levelsWrap = levelsModal.querySelector('div > div');
+  for(let i=1;i<=Math.min(200,MAX_LEVEL);i++){
+    const b = document.createElement('button'); b.textContent = i; b.style.padding='6px';
+    b.addEventListener('click', ()=>{ level=i; localStorage.setItem('eat_level',String(level)); startLevel(level); levelsModal.classList.add('hidden'); });
+    levelsWrap.appendChild(b);
+  }
+
+  // UI
+  document.getElementById('btnPlay').onclick = ()=>{ startLevel(level); menu.classList.add('hidden'); gameArea.classList.remove('hidden'); };
+  document.getElementById('btnContinue').onclick = ()=>{ startLevel(level); menu.classList.add('hidden'); gameArea.classList.remove('hidden'); };
+  document.getElementById('btnMenu').onclick = ()=>{ gameArea.classList.add('hidden'); menu.classList.remove('hidden'); };
+  document.getElementById('btnLevels').onclick = ()=>{ levelsModal.classList.remove('hidden'); menu.classList.add('hidden'); };
+  document.getElementById('btnCloseLevels').onclick = ()=>{ levelsModal.classList.add('hidden'); menu.classList.remove('hidden'); };
+  document.getElementById('btnSettings').onclick = ()=>{ settingsModal.classList.remove('hidden'); menu.classList.add('hidden'); };
+  document.getElementById('btnCloseSettings').onclick = ()=>{ settingsModal.classList.add('hidden'); menu.classList.remove('hidden'); };
+  document.getElementById('toggleSound').onchange = (e)=>{ soundOn = e.target.checked; localStorage.setItem('eat_sound', soundOn ? '1' : '0'); };
+
+  // Canvas + game (adapted from prototype)
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const sizeEl = document.getElementById('size');
+  const statusEl = document.getElementById('status');
+
+  let game = null;
+  function randInt(a,b){return Math.floor(Math.random()*(b-a+1))+a}
+  function shuffle(a){for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+
+  function generateLevelConfig(level){
+    const oranges = Math.min(60, 3 + Math.floor(level/7));
+    const walls = Math.min(220, 8 + Math.floor(level*0.9));
+    const guards = Math.min(8, Math.floor(level/60));
+    const requiredStrength = 3 + Math.floor(level/40);
+    return {grid: gridSize, oranges, walls, guards, requiredStrength};
+  }
+
+  function createGame(level){
+    const cfg = generateLevelConfig(level);
+    const N = cfg.grid;
+    const sizePx = Math.min(720, N * 30);
+    canvas.width = sizePx; canvas.height = sizePx;
+    const cellSize = Math.floor(sizePx / N);
+
+    const grid = Array.from({length:N},()=>Array(N).fill(0));
+    for(let x=0;x<N;x++){grid[0][x]=1;grid[N-1][x]=1;grid[x][0]=1;grid[x][N-1]=1}
+    for(let i=0;i<cfg.walls;i++){ const x=randInt(1,N-2);const y=randInt(1,N-2); if(grid[y][x]===0) grid[y][x]=1; }
+    const edges = []; for(let i=1;i<N-1;i++){edges.push([i,1]);edges.push([i,N-2]);edges.push([1,i]);edges.push([N-2,i])}
+    shuffle(edges); let exitPos = edges.find(([x,y]) => grid[y][x]===0) || [N-2,N-2]; grid[exitPos[1]][exitPos[0]] = 3;
+    let placed=0; let attempts=0;
+    while(placed<cfg.oranges && attempts<cfg.oranges*60){ attempts++; const x=randInt(1,N-2); const y=randInt(1,N-2); if(grid[y][x]===0){grid[y][x]=2; placed++;} }
+    const guards=[];
+    for(let g=0;g<cfg.guards;g++){ let gx=randInt(2,N-3); let gy=randInt(2,N-3); if(grid[gy][gx]===0){guards.push({x:gx,y:gy,dir:randInt(0,3)}); } }
+    let sx=Math.floor(N/2), sy=Math.floor(N/2);
+    if(grid[sy][sx]!==0){ const spots=[]; for(let y=1;y<N-1;y++) for(let x=1;x<N-1;x++) if(grid[y][x]===0) spots.push([x,y]); const p=spots[randInt(0,spots.length-1)]; if(p){sx=p[0]; sy=p[1]} }
+    const snake = [{x:sx,y:sy},{x:sx-1,y:sy},{x:sx-2,y:sy}];
+    let dir = {x:1,y:0}; let pendingDir = null; let eaten=0; let tickCount=0; let alive=true;
+    return { level, cfg, N, grid, snake, dir, pendingDir, guards, exitPos, eaten, tickCount, alive, requiredStrength:cfg.requiredStrength, cellSize };
+  }
+
+  function draw(game){
+    const N = game.N; const cs = game.cellSize;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#07151a'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    for(let y=0;y<N;y++) for(let x=0;x<N;x++){ const cell = game.grid[y][x]; const px = x*cs, py = y*cs;
+      if(cell===1){ ctx.fillStyle='#223'; ctx.fillRect(px,py,cs,cs); }
+      else if(cell===2){ ctx.fillStyle='#072'; ctx.fillRect(px,py,cs,cs); ctx.beginPath(); ctx.fillStyle='#f78a1d'; ctx.arc(px+cs/2,py+cs/2,cs*0.28,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#432'; ctx.fillRect(px+cs*0.55,py+cs*0.22,cs*0.08,cs*0.08); }
+      else if(cell===3){ ctx.fillStyle='#0a0a06'; ctx.fillRect(px,py,cs,cs); ctx.fillStyle='#ffd700'; ctx.fillRect(px+cs*0.15,py+cs*0.35,cs*0.7,cs*0.3); }
+    }
+    for(const g of game.guards){ const px=g.x*game.cellSize, py=g.y*game.cellSize; ctx.fillStyle='#6b2b2b'; ctx.fillRect(px+2,py+2,game.cellSize-4,game.cellSize-4); ctx.fillStyle='#fff'; ctx.fillRect(px+game.cellSize*0.28,py+game.cellSize*0.25,game.cellSize*0.44,game.cellSize*0.2); }
+    for(let i=game.snake.length-1;i>=0;i--){ const p = game.snake[i]; const px=p.x*game.cellSize, py=p.y*game.cellSize; if(i===0){ ctx.fillStyle='#3fbf4f'; ctx.fillRect(px+2,py+2,game.cellSize-4,game.cellSize-4); ctx.fillStyle='#051'; ctx.fillRect(px+game.cellSize*0.6,py+game.cellSize*0.25,Math.max(2,game.cellSize*0.08),Math.max(2,game.cellSize*0.08)); } else { ctx.fillStyle='#2ea34a'; ctx.fillRect(px+2,py+2,game.cellSize-4,game.cellSize-4); } }
+    levelNumber.textContent = game.level; scoreEl.textContent = game.eaten * 10; sizeEl.textContent = game.snake.length;
+  }
+
+  function step(game){
+    if(!game.alive) return;
+    game.tickCount++;
+    for(const g of game.guards){ if(Math.random()<0.4) g.dir = randInt(0,3); const d = [[1,0],[-1,0],[0,1],[0,-1]][g.dir]; const nx=g.x+d[0], ny=g.y+d[1]; if(nx>0 && ny>0 && nx<game.N-1 && ny<game.N-1 && game.grid[ny][nx]!==1){ g.x=nx; g.y=ny; } }
+    if(game.pendingDir){ const nd = game.pendingDir; const head = game.snake[0]; const neck = game.snake[1]; if(!(head.x+nd.x===neck.x && head.y+nd.y===neck.y)) game.dir = nd; game.pendingDir = null; }
+    const head = game.snake[0]; const nx = head.x + game.dir.x, ny = head.y + game.dir.y;
+    if(nx<0||ny<0||nx>=game.N||ny>=game.N || game.grid[ny][nx]===1){ game.alive=false; statusEl.textContent='You hit a wall!'; if(navigator.vibrate) navigator.vibrate(120); playBeep(180); return; }
+    for(const g of game.guards) if(g.x===nx && g.y===ny){ game.alive=false; statusEl.textContent='Caught by guard!'; if(navigator.vibrate) navigator.vibrate(200); playBeep(120); return; }
+    for(let i=0;i<game.snake.length;i++){ if(game.snake[i].x===nx && game.snake[i].y===ny){ game.alive=false; statusEl.textContent='You bit yourself!'; playBeep(100); return; } }
+    game.snake.unshift({x:nx,y:ny});
+    const cell = game.grid[ny][nx];
+    if(cell===2){ game.eaten++; game.grid[ny][nx]=0; statusEl.textContent='Orange eaten!'; playBeep(700,0.06); }
+    else if(cell===3){ if(game.eaten>=game.requiredStrength){ statusEl.textContent='Level cleared!'; playBeep(1000,0.12); localStorage.setItem('eat_level', String(Math.min(MAX_LEVEL, game.level+1))); startLevel(Math.min(MAX_LEVEL, game.level+1)); return; } else { game.snake.shift(); statusEl.textContent='Need more strength to exit'; playBeep(300,0.06); return; } }
+    else { game.snake.pop(); }
+  }
+
+  let loopTimer = null;
+  function startLoop(){ stopLoop(); loopTimer = setInterval(()=>{ if(game){ step(game); draw(game); } }, 1000/Math.max(1, speed)); }
+  function stopLoop(){ if(loopTimer) clearInterval(loopTimer); loopTimer=null; }
+
+  window.addEventListener('keydown', e=>{ if(!game) return; const k = e.key; const map = {ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0],'w':[0,-1],'s':[0,1],'a':[-1,0],'d':[1,0]}; if(map[k]){ e.preventDefault(); game.pendingDir = {x:map[k][0], y:map[k][1]}; } });
+
+  document.getElementById('btnStart').addEventListener('click', ()=> startLevel(level));
+  document.getElementById('btnNext').addEventListener('click', ()=>{ level = Math.min(MAX_LEVEL, level+1); localStorage.setItem('eat_level', String(level)); startLevel(level); });
+  document.getElementById('speedRange').addEventListener('input', e=>{ speed = parseInt(e.target.value); localStorage.setItem('eat_speed', String(speed)); startLoop(); });
+  document.getElementById('gridSize').addEventListener('change', e=>{ gridSize = parseInt(e.target.value); localStorage.setItem('eat_grid', String(gridSize)); startLevel(level); });
+
+  function startLevel(lvl){ stopLoop(); game = createGame(lvl); level = lvl; localStorage.setItem('eat_level', String(level)); draw(game); startLoop(); statusEl.textContent=''; }
+
+  // initial
+  startLevel(level);
+
+})();
+</script>
+</body>
+</html>
